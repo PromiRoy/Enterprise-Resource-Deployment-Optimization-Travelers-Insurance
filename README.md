@@ -8,12 +8,9 @@ analytics capstone (DS7900) with Travelers Insurance.
 within SLA, 2.85 travel hours and 109 miles per claim, 124 of 774
 adjusters deployed, ~6 minute solve.
 
-**Pipeline:** severity imputation (LinearSVR on claim narratives) →
+**Pipeline:** Severity imputation (LinearSVR on claim narratives) →
 on-site/virtual routing → K-Means clustering (K=19) → OSRM travel
 matrix → Gurobi MIP → dashboard.
 
 [Full report (PDF)](Travelers_CAT_Resource_Deployment_Report.pdf)
 
-**Data note:** original claim and adjuster data provided by the
-sponsor for the capstone and not distributed. A synthetic generator
-with the same schema is included so the pipeline runs end to end.
