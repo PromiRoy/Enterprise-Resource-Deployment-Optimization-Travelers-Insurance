@@ -12,7 +12,7 @@ adjusters deployed, ~6 minute solve.
 on-site/virtual routing → K-Means clustering (K=19) → OSRM travel
 matrix → Gurobi MIP → dashboard.
 
-[Full report (PDF)](docs/Travelers_CAT_Report.pdf)
+[Full report (PDF)](Travelers_CAT_Resource_Deployment_Report.pdf)
 
 **Data note:** original claim and adjuster data provided by the
 sponsor for the capstone and not distributed. A synthetic generator
