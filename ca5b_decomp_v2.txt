@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""
+ca5b_decomp_v2.py — Cini & Abela replication, closing arm: era-decomposition
+of the Base-beating gap (pre-registered clause: any arm beating Base gets
+decomposed). Question: is the gap content, or time-tracking?
+Arms (forward-chained by season, train <= k, test k+1, k=3..8; SVR and Lasso):
+  meta-only        air index + air year                (pure time)
+  crew-only        CA-2 features                       (trailing-rating proxies)
+  meta+crew        both, still ZERO text
+  none-config      CA-1 + cluster + keywords + meta [+ crew]  (ca5 reference)
+Reading, frozen in advance: if meta+crew matches the best full-stack score
+(~ -0.13), the entire Base-beating gap is era/persistence tracking and every
+text block is neutral-to-harmful; any shortfall bounds the text contribution.
+Run: nohup python3 -u ca5b_decomp_v1.txt > ca5b_out.txt 2>&1 &  ; tail -f ca5b_out.txt
+"""
+import os
+for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ[v] = "2"
+import re, warnings; warnings.filterwarnings("ignore")
+import numpy as np
+import pandas as pd
+
+def P(*a): print(*a, flush=True)
+
+man = pd.read_csv("manifest.csv")
+cols = {c.lower(): c for c in man.columns}
+inc = None
+for cand in ("included", "include", "is_included", "excluded", "exclude"):
+    if cand in cols:
+        v = man[cols[cand]]
+        b = v.values.astype(bool) if v.dtype == bool else v.astype(str).str.lower().isin(["true", "1", "yes"]).values
+        inc = ~b if "exclud" in cand else b
+        break
+assert inc is not None and inc.sum() == 151
+idc = next(c for c in man.columns if man[c].astype(str).str.contains("SE0").any())
+c_r = cols.get("rating") or cols.get("imdb_rating")
+sf_ids = man.loc[inc, idc].astype(str).tolist()
+y = man.loc[inc, c_r].astype(float).values
+season = np.array([int(re.search(r"SE(\d\d)", s).group(1)) for s in sf_ids])
+
+vw = pd.read_csv("seinfeld_nielsen_viewership.csv")[["sf_id", "airdate"]]
+vw["base"] = vw["sf_id"].str.extract(r"(SF_SE\d\d_EP\d\d)")[0]
+amap = dict(zip(vw["base"], pd.to_datetime(vw["airdate"])))
+airdt = pd.Series([amap.get(re.search(r"SF_SE\d\d_EP\d\d", s).group(0)) for s in sf_ids])
+meta = np.column_stack([airdt.rank(method="first").values.astype(float),
+                        airdt.dt.year.values.astype(float)])
+
+ca1 = pd.read_csv("features_ca1.csv"); assert list(ca1.sf_id) == sf_ids
+clus = pd.get_dummies(ca1.pop("arc_cluster"), prefix="c").values.astype(float)
+ca1_X = ca1.drop(columns=["sf_id"]).values.astype(float)
+ca2 = pd.read_csv("features_ca2.csv"); assert list(ca2.sf_id) == sf_ids
+ca2_X = ca2.drop(columns=["sf_id"]).values.astype(float)
+kw = np.load("features_ca4_keywords.npy")
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.svm import SVR
+from sklearn.linear_model import Lasso
+from sklearn.metrics import r2_score, mean_absolute_error
+
+FOLDS = [(k, k + 1) for k in range(3, 9)]
+def run(mk, X):
+    pr, tr_ = [], []
+    for k, t in FOLDS:
+        tr, te = np.where(season <= k)[0], np.where(season == t)[0]
+        pipe = Pipeline([("i", SimpleImputer()), ("s", StandardScaler()), ("m", mk())])
+        pipe.fit(X[tr], y[tr]); pr.append(pipe.predict(X[te])); tr_.append(y[te])
+    p, t = np.concatenate(pr), np.concatenate(tr_)
+    return r2_score(t, p), mean_absolute_error(t, p)
+
+class Mean:
+    def fit(s, X, yy): s.m = yy.mean(); return s
+    def predict(s, X): return np.full(len(X), s.m)
+
+ARMS = [("Base (train mean)", lambda: Mean(), np.zeros((151, 1))),
+        ("meta-only", None, meta),
+        ("crew-only", None, ca2_X),
+        ("meta+crew (ZERO text)", None, np.hstack([meta, ca2_X])),
+        ("none-config no-crew", None, np.hstack([ca1_X, clus, kw, meta])),
+        ("none-config with-crew", None, np.hstack([ca1_X, clus, kw, meta, ca2_X]))]
+P(f"test rows: {int((season>=4).sum())}   (frozen reading in the docstring)")
+for label, mk, X in ARMS:
+    if mk is None:      # feature arms: SVR + Lasso
+        for mname, mfac in [("SVR", lambda: SVR()), ("Lasso", lambda: Lasso(alpha=0.1))]:
+            r2, mae = run(mfac, X)
+            P(f"{label:24s} {mname:6s} R2={r2:7.3f}  MAE={mae:.3f}")
+    else:               # Base: its own predictor, once
+        r2, mae = run(mk, X)
+        P(f"{label:24s} {'':6s} R2={r2:7.3f}  MAE={mae:.3f}")
+P("\nDONE. If meta+crew ~= best full-stack, the gap is era-tracking; text adds nothing.")

@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+"""
+ca4_keywords_v6.py — Cini & Abela replication, Package 4, v4 (FINAL design).
+User direction: "movies and episodes are not the same — choose words from the
+reasonings." Keywords now come from each episode's per-laugh JOKE REASONINGS
+(the WHY explanations), the project's native content object.
+Method: concatenate the episode's WHYs -> split into ~200-word blocks (fits
+KeyBERT's encoder; no truncation bias) -> top-8 keywords per block -> vote
+across blocks -> top 20 per episode. Character names and the reasonings'
+analytical boilerplate (humor/contrast/absurdity/... — identical in every
+episode) are stoplisted so keywords carry episode-specific content; the audit
+csv shows every list for your check. Pitch/Ticket rows share the hour's
+reasonings (disclosed). Then their pipeline unchanged: lemmatize + stopwords
+-> Word2Vec(50, w15, mc1, sg1) -> mean keyword vector per episode.
+v6: generic keywords are FOUND and REPORTED (ca4_generic_keywords.csv), never dropped (user ruling).\nOutput: features_ca4_keywords.npy (151 x 50) + ca4_keywords_audit.csv.
+Run: nohup python3 -u ca4_keywords_v4.txt > ca4_out.txt 2>&1 &  ; tail -f ca4_out.txt
+"""
+import os
+for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ[v] = "1"
+import csv, glob, json, re
+from collections import Counter
+import numpy as np
+import pandas as pd
+
+def P(*a): print(*a, flush=True)
+
+man = pd.read_csv("manifest.csv")
+cols = {c.lower(): c for c in man.columns}
+inc = None
+for cand in ("included", "include", "is_included", "excluded", "exclude"):
+    if cand in cols:
+        v = man[cols[cand]]
+        b = v.values.astype(bool) if v.dtype == bool else v.astype(str).str.lower().isin(["true", "1", "yes"]).values
+        inc = ~b if "exclud" in cand else b
+        break
+assert inc is not None and inc.sum() == 151
+idc = next(c for c in man.columns if man[c].astype(str).str.contains("SE0").any())
+sf_ids = man.loc[inc, idc].astype(str).tolist()
+
+def get(d, *names, default=None):
+    for k in d:
+        if k.lower() in names: return d[k]
+    return default
+
+def episode_whys(sf):
+    base = re.search(r"SF_SE\d\d_EP\d\d", sf).group(0)
+    if base == "SF_SE04_EP04": base = "SF_SE04_EP03"   # Ticket shares the Pitch hour
+    se, ep = int(base[5:7]), int(base[10:12])
+    p = f"pilot/reasons_E{ep:02d}.json" if se == 1 else f"reasoning_run/reasons_{base}.json"
+    d = json.load(open(p))
+    if isinstance(d, dict):
+        d = get(d, "reasonings", "reasons", default=list(d.values())[0])
+    whys = []
+    for r in d:
+        w = get(r, "why", default="")
+        if w: whys.append(str(w))
+    return whys
+
+def blocks(whys, max_words=200):
+    out, cur, n = [], [], 0
+    for w in whys:
+        k = len(w.split())
+        if n + k > max_words and cur:
+            out.append(" ".join(cur)); cur, n = [], 0
+        cur.append(w); n += k
+    if cur: out.append(" ".join(cur))
+    return out
+
+P("loading KeyBERT...")
+from keybert import KeyBERT
+km = KeyBERT()
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import stopwords
+LEM = WordNetLemmatizer()
+STOP = set(stopwords.words("english"))
+NAMES = {"jerry", "george", "elaine", "kramer", "newman", "seinfeld", "costanza", "benes"}
+ANALYSIS = set("""humor humour humorous comedic comedy comically funny laugh laughs
+laughter joke jokes punchline setup scene moment situation response reaction
+reactions unexpected unexpectedly absurd absurdity absurdly ridiculous
+ridiculousness contrast contrasts contrasting creating creates adding adds
+highlighting highlights emphasizing emphasizes emphasis tension disconnect
+exaggerated exaggeration exaggerating irony ironic dialogue conversation
+character characters earlier previous statement comment remark""".split())
+
+def clean_phrases(kws):
+    out = []
+    for phrase, _ in kws:
+        toks = [LEM.lemmatize(w) for w in re.findall(r"[a-z']+", phrase.lower())
+                if w not in STOP and w not in NAMES and w not in ANALYSIS and len(w) > 2]
+        if toks: out.append("_".join(toks))
+    return out
+
+pools = []
+for i, sf in enumerate(sf_ids):
+    votes = Counter()
+    for blk in blocks(episode_whys(sf)):
+        for k in clean_phrases(km.extract_keywords(blk, keyphrase_ngram_range=(1, 2),
+                                                   stop_words="english", top_n=8)):
+            votes[k] += 1
+    pools.append(votes)
+    if (i + 1) % 25 == 0: P(f"  {i+1}/151 keyword sets done")
+
+# USER RULING: find corpus-generic keywords but DO NOT drop them.
+# Report every keyword present in >60% of episodes' top-40 pools; keep all.
+df = Counter()
+for v in pools:
+    for k, _ in v.most_common(40): df[k] += 1
+CUT = 0.60 * len(pools)
+generic = sorted([(k, c) for k, c in df.items() if c > CUT], key=lambda x: -x[1])
+P(f"corpus-generic keywords (>60% of episodes; REPORTED, NOT dropped): {len(generic)}")
+for k, c in generic: P(f"   {c:4d}/{len(pools)} episodes: {k}")
+with open("ca4_generic_keywords.csv", "w", newline="") as f:
+    w = csv.writer(f); w.writerow(["keyword", "n_episodes"]); w.writerows(generic)
+all_kw = [[k for k, _ in v.most_common(20)] for v in pools]
+
+with open("ca4_keywords_audit.csv", "w", newline="") as f:
+    w = csv.writer(f); w.writerow(["sf_id", "keywords"])
+    for sf, kws in zip(sf_ids, all_kw): w.writerow([sf, " ".join(kws)])
+
+from gensim.models import Word2Vec
+P("training Word2Vec(vector_size=50, window=15, min_count=1, sg=1)...")
+w2v = Word2Vec(sentences=all_kw, vector_size=50, window=15, min_count=1, sg=1, seed=0, workers=1)
+V = np.zeros((len(sf_ids), 50))
+for i, kws in enumerate(all_kw):
+    vecs = [w2v.wv[k] for k in kws if k in w2v.wv]
+    if vecs: V[i] = np.mean(vecs, axis=0)
+np.save("features_ca4_keywords.npy", V)
+P(f"\nDONE. features_ca4_keywords.npy {V.shape}; audit csv written.")
+P("sample keywords, first episode:", " | ".join(all_kw[0][:12]))
