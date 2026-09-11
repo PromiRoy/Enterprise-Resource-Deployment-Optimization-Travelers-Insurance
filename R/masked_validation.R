@@ -13,7 +13,7 @@ library(readxl)
 library(e1071)
 
 # Load dataset
-df <- read_excel("ClaimDetails_for_distribution.xlsx")
+df <- read_excel("../data/raw/ClaimDetails_for_distribution.xlsx")
 
 # Keep rows with known severity
 dataset <- df %>%

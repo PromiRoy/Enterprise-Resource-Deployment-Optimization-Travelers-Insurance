@@ -1,0 +1,33 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+Untitled*.ipynb
+*-Copy*.ipynb
+
+# --- R ---
+.Rhistory
+.RData
+.Rproj.user/
+
+# --- Large binary artifacts (raw data in data/raw/ is intentionally tracked: sanctioned "for_distribution" copies) ---
+*.pkl
+*.parquet
+*.h5
+*.npy
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Outputs you regenerate ---
+outputs/tmp/

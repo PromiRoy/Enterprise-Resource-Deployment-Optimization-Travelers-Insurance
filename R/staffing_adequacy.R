@@ -2,8 +2,8 @@ library(readxl)
 library(ggplot2)
 
 
-roster <- read_excel("CatRosterReportDayOf_for_distribution_cleaned.xlsx", sheet = 1)
-claims <- read_excel("ClaimDetails_for_distribution.xlsx", sheet = 1)
+roster <- read_excel("../data/raw/CatRosterReportDayOf_for_distribution_cleaned.xlsx", sheet = 1)
+claims <- read_excel("../data/raw/ClaimDetails_for_distribution.xlsx", sheet = 1)
 
 # -----------------------------
 # 1) Helpers: clean/extract city

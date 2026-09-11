@@ -15,7 +15,7 @@ library(writexl)
 library(e1071)
 
 # Load data
-df <- read_excel("ClaimDetails_for_distribution.xlsx")
+df <- read_excel("../data/raw/ClaimDetails_for_distribution.xlsx")
 df <- ClaimDetails_for_distribution_1_
 # Split datasets
 dataset_notnull <- df %>%

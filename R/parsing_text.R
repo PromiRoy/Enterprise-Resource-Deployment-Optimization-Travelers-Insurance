@@ -9,7 +9,7 @@ library(readxl)
 library(writexl)
 
 # Read the Excel file
-df <- read_excel("ClaimDetails_for_distribution.xlsx")
+df <- read_excel("../data/raw/ClaimDetails_for_distribution.xlsx")
 
 
 
